@@ -1,14 +1,46 @@
-// Make it so that shift-clicking brings up an image picker
-// Ase an ObjectURL to update the image
+// Make it so clicking again removes the property
+// Figure out how to save it via local storage
 //
 // See https://developer.mozilla.org/en-US/docs/Web/API/File_API/Using_files_from_web_applications
 // for more info
 
-use wasm_bindgen::JsCast;
-use web_sys::Element;
-use yew::prelude::*;
+use {
+    gloo_events::EventListener,
+    gloo_utils::document,
+    wasm_bindgen::JsCast,
+    web_sys::{Element, HtmlElement, HtmlInputElement, Url},
+    yew::prelude::*,
+};
 
 const FLIPPED: &str = "flipped";
+
+fn upload_image(e: &MouseEvent) -> Option<()> {
+    let button_style = e.target()?.dyn_into::<HtmlElement>().ok()?.style();
+    let input = document()
+        .create_element("input")
+        .ok()?
+        .dyn_into::<HtmlInputElement>()
+        .ok()?;
+    input.set_attribute("type", "file").ok()?;
+    input.set_attribute("accept", "image/*").ok()?;
+    EventListener::once(&input, "change", move |e: &Event| {
+        if let Some(target) = e.target() {
+            if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
+                if let Some(files) = input.files() {
+                    if let Some(file) = files.get(0) {
+                        if let Ok(url) = Url::create_object_url_with_blob(&file) {
+                            let _ = button_style
+                                .set_property("background-image", &format!("url(\"{url}\")"));
+                        }
+                    }
+                }
+            }
+        }
+    })
+    .forget(); // NOTE: forget is for PoC, not production
+    input.click();
+    None
+}
 
 fn toggle_flipped(e: &MouseEvent) -> Option<()> {
     let cl = e.target()?.dyn_into::<Element>().ok()?.class_list();
@@ -24,13 +56,17 @@ fn toggle_flipped(e: &MouseEvent) -> Option<()> {
 fn app() -> Html {
     let onclick: Callback<MouseEvent> = {
         |e: MouseEvent| {
-            toggle_flipped(&e);
+            if e.shift_key() {
+                upload_image(&e);
+            } else {
+                toggle_flipped(&e);
+            }
         }
     }
     .into();
     html! {
         <div class={"button"}>
-            <div class={"button-wrapper examine"} {onclick}/>
+            <div class={"button-wrapper examine"} {onclick} />
         </div>
     }
 }
