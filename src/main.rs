@@ -1,4 +1,3 @@
-// Make it so clicking again removes the property
 // Figure out how to save it via local storage
 //
 // See https://developer.mozilla.org/en-US/docs/Web/API/File_API/Using_files_from_web_applications
@@ -8,7 +7,7 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     wasm_bindgen::JsCast,
-    web_sys::{Element, HtmlElement, HtmlInputElement, Url},
+    web_sys::{HtmlElement, HtmlInputElement, Url},
     yew::prelude::*,
 };
 
@@ -43,7 +42,9 @@ fn upload_image(e: &MouseEvent) -> Option<()> {
 }
 
 fn toggle_flipped(e: &MouseEvent) -> Option<()> {
-    let cl = e.target()?.dyn_into::<Element>().ok()?.class_list();
+    let button = e.target()?.dyn_into::<HtmlElement>().ok()?;
+    let _ = button.style().remove_property("background-image");
+    let cl = button.class_list();
     if cl.contains(FLIPPED) {
         let _ = cl.remove_1(FLIPPED);
     } else {
