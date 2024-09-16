@@ -1,0 +1,25 @@
+.button {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 100px;
+    left: 100px;
+}
+
+.button-wrapper {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background-image: url("red-b.svg");
+    background-size: 100% 100%;
+    z-index: 1;
+}
+
+.magnify:hover, .examine:hover {
+    z-index: 999;
+    transition: .15s;
+}
+
+.examine:hover {
+    transform: scale(5.0);
+}
