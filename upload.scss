@@ -15,6 +15,10 @@
     z-index: 1;
 }
 
+.button-wrapper.flipped {
+    background-image: url("sleeping-dino.svg");
+}
+
 .magnify:hover, .examine:hover {
     z-index: 999;
     transition: .15s;
