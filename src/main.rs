@@ -1,3 +1,9 @@
+// See https://github.com/rustwasm/wasm-bindgen/issues/2551 for useful stuff
+// https://github.com/devashishdxt/rexie
+//
+// Looks like rexie stores JsValues and that a Blob is a JsValue, but I
+// can't be sure.
+
 // Figure out how to save it via local storage
 //
 // See https://developer.mozilla.org/en-US/docs/Web/API/File_API/Using_files_from_web_applications
@@ -31,6 +37,9 @@ fn upload_image(e: &MouseEvent) -> Option<()> {
                             let _ = button_style
                                 .set_property("background-image", &format!("url(\"{url}\")"));
                         }
+                        // TODO: spawn a future that gets an array_buffer
+                        // and when we get that array buffer, store it in
+                        // local storage for now
                     }
                 }
             }
