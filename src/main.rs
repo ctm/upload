@@ -36,7 +36,13 @@ async fn build_database() -> Msg {
 }
 
 async fn store_button(t: Transaction, file: File) -> Msg {
-    Msg::ButtonStored(todo!())
+    async fn inner(t: Transaction, file: File) -> Result<(), RexieError> {
+        let store = t.store(BUTTONS)?;
+        store.add(&file, None).await?;
+        t.done().await?;
+        Ok(())
+    }
+    Msg::ButtonStored(inner(t, file).await)
 }
 
 fn toggle_flipped(button: &HtmlElement) -> Option<()> {
@@ -86,6 +92,7 @@ impl From<&MouseEvent> for ClickAction {
 enum Msg {
     DbBuilt(Result<Rexie, RexieError>),
     Clicked(ClickAttempt),
+    StoreButton(File),
     ButtonStored(Result<(), RexieError>),
 }
 
@@ -111,43 +118,34 @@ static STORE_NAMES: [&str; 1] = [BUTTONS];
 
 impl App {
     fn upload_image(&mut self, link: Scope<Self>, button: &HtmlElement) -> Option<()> {
-        if let Some(Ok(db)) = &self.db {
-            let button_style = button.style();
-            let input = document()
-                .create_element("input")
-                .ok()?
-                .dyn_into::<HtmlInputElement>()
-                .ok()?;
-            input.set_attribute("type", "file").ok()?;
-            input.set_attribute("accept", "image/*").ok()?;
-            // NOTE: we never attempt to set change_listener back to None,
-            // because there's not much of a leak if we leave it in place,
-            // since if we create a new listener, it'll overwrite--and
-            // hence drop--the old one.
-            self.change_listener = Some(EventListener::once(&input, "change", move |e: &Event| {
-                if let Some(target) = e.target() {
-                    if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
-                        if let Some(files) = input.files() {
-                            if let Some(file) = files.get(0) {
-                                if let Ok(url) = Url::create_object_url_with_blob(&file) {
-                                    let _ = button_style.set_property(
-                                        "background-image",
-                                        &format!("url(\"{url}\")"),
-                                    );
-                                }
-                                // Can't do this, because we're in the EventListener closure.  We can either create a transaction outside the closure and move it in, or we can send the File back to ourself and then process it in the event loop.
-                                if let Ok(t) =
-                                    db.transaction(&STORE_NAMES, TransactionMode::ReadWrite)
-                                {
-                                    link.send_future(store_button(t, file));
-                                }
+        let button_style = button.style();
+        let input = document()
+            .create_element("input")
+            .ok()?
+            .dyn_into::<HtmlInputElement>()
+            .ok()?;
+        input.set_attribute("type", "file").ok()?;
+        input.set_attribute("accept", "image/*").ok()?;
+        // NOTE: we never attempt to set change_listener back to None,
+        // because there's not much of a leak if we leave it in place,
+        // since if we create a new listener, it'll overwrite--and
+        // hence drop--the old one.
+        self.change_listener = Some(EventListener::once(&input, "change", move |e: &Event| {
+            if let Some(target) = e.target() {
+                if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
+                    if let Some(files) = input.files() {
+                        if let Some(file) = files.get(0) {
+                            if let Ok(url) = Url::create_object_url_with_blob(&file) {
+                                let _ = button_style
+                                    .set_property("background-image", &format!("url(\"{url}\")"));
                             }
+                            link.send_message(Msg::StoreButton(file));
                         }
                     }
                 }
-            }));
-            input.click();
-        }
+            }
+        }));
+        input.click();
         None
     }
 }
@@ -188,6 +186,14 @@ impl Component for App {
             })) => {
                 self.upload_image(ctx.link().clone(), &button);
                 true
+            }
+            Msg::StoreButton(file) => {
+                if let Some(Ok(db)) = &self.db {
+                    if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
+                        ctx.link().send_future(store_button(t, file));
+                    }
+                }
+                false
             }
             Msg::DbBuilt(result) => {
                 self.db = Some(result);
