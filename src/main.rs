@@ -12,15 +12,15 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    wasm_bindgen::JsCast,
+    wasm_bindgen::{JsCast, JsValue},
     web_sys::{HtmlElement, HtmlInputElement, Url},
     yew::prelude::*,
 };
 
 const FLIPPED: &str = "flipped";
 
-fn upload_image(e: &MouseEvent) -> Option<()> {
-    let button_style = e.target()?.dyn_into::<HtmlElement>().ok()?.style();
+fn upload_image(button: &HtmlElement) -> Option<()> {
+    let button_style = button.style();
     let input = document()
         .create_element("input")
         .ok()?
@@ -50,8 +50,7 @@ fn upload_image(e: &MouseEvent) -> Option<()> {
     None
 }
 
-fn toggle_flipped(e: &MouseEvent) -> Option<()> {
-    let button = e.target()?.dyn_into::<HtmlElement>().ok()?;
+fn toggle_flipped(button: &HtmlElement) -> Option<()> {
     let _ = button.style().remove_property("background-image");
     let cl = button.class_list();
     if cl.contains(FLIPPED) {
@@ -62,22 +61,97 @@ fn toggle_flipped(e: &MouseEvent) -> Option<()> {
     None
 }
 
-#[function_component(App)]
-fn app() -> Html {
-    let onclick: Callback<MouseEvent> = {
-        |e: MouseEvent| {
-            if e.shift_key() {
-                upload_image(&e);
-            } else {
-                toggle_flipped(&e);
-            }
+#[derive(Default)]
+struct App {
+    change_listener: Option<EventListener>,
+}
+
+enum ClickError {
+    NoTarget,
+    NotHtmlElement,
+}
+
+enum ClickAction {
+    Flip,
+    ChooseImage,
+}
+
+struct Click {
+    button: HtmlElement,
+    action: ClickAction,
+}
+
+type ClickAttempt = Result<Click, ClickError>;
+
+impl From<&MouseEvent> for ClickAction {
+    fn from(event: &MouseEvent) -> Self {
+        if event.shift_key() {
+            Self::ChooseImage
+        } else {
+            Self::Flip
         }
     }
-    .into();
-    html! {
-        <div class={"button"}>
-            <div class={"button-wrapper examine"} {onclick} />
-        </div>
+}
+
+enum Msg {
+    Clicked(ClickAttempt),
+}
+
+impl TryFrom<&MouseEvent> for Click {
+    type Error = ClickError;
+
+    fn try_from(m: &MouseEvent) -> ClickAttempt {
+        let button = m
+            .target()
+            .ok_or(ClickError::NoTarget)?
+            .dyn_into::<HtmlElement>()
+            .map_err(|_| ClickError::NotHtmlElement)?;
+        let action = m.into();
+        Ok(Click { button, action })
+    }
+}
+
+fn clicked(m: MouseEvent) -> Msg {
+    Msg::Clicked((&m).try_into())
+}
+
+impl Component for App {
+    type Message = Msg;
+    type Properties = ();
+
+    fn create(ctx: &Context<Self>) -> Self {
+        Default::default()
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let onclick: Callback<MouseEvent> = ctx.link().callback(clicked);
+        html! {
+            <div class={"button"}>
+                <div class={"button-wrapper examine"} {onclick} />
+                </div>
+        }
+    }
+
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        use ClickAction::*;
+
+        match msg {
+            Msg::Clicked(Err(e)) => false, // TODO
+            Msg::Clicked(Ok(Click {
+                action: Flip,
+                button,
+            })) => {
+                toggle_flipped(&button);
+                true
+            }
+            Msg::Clicked(Ok(Click {
+                action: ChooseImage,
+                button,
+            })) => {
+                upload_image(&button);
+                true
+            }
+        }
     }
 }
 
