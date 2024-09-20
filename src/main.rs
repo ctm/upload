@@ -12,12 +12,31 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
+    rexie::{Error as RexieError, ObjectStore, Rexie},
     wasm_bindgen::JsCast,
-    web_sys::{HtmlElement, HtmlInputElement, Url},
-    yew::prelude::*,
+    web_sys::{File, HtmlElement, HtmlInputElement, Url},
+    yew::{html::Scope, prelude::*},
 };
 
 const FLIPPED: &str = "flipped";
+
+async fn build_database() -> Msg {
+    Msg::DbBuilt(
+        Rexie::builder("mb")
+            .version(1)
+            .add_object_store(
+                ObjectStore::new("buttons")
+                    .key_path("id")
+                    .auto_increment(true),
+            )
+            .build()
+            .await,
+    )
+}
+
+async fn store_button(file: File) -> Msg {
+    Msg::ButtonStored(todo!())
+}
 
 fn toggle_flipped(button: &HtmlElement) -> Option<()> {
     let _ = button.style().remove_property("background-image");
@@ -33,6 +52,7 @@ fn toggle_flipped(button: &HtmlElement) -> Option<()> {
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
+    db: Option<Result<Rexie, RexieError>>,
 }
 
 enum ClickError {
@@ -63,7 +83,9 @@ impl From<&MouseEvent> for ClickAction {
 }
 
 enum Msg {
+    DbBuilt(Result<Rexie, RexieError>),
     Clicked(ClickAttempt),
+    ButtonStored(Result<(), RexieError>),
 }
 
 impl TryFrom<&MouseEvent> for Click {
@@ -85,7 +107,9 @@ fn clicked(m: MouseEvent) -> Msg {
 }
 
 impl App {
-    fn upload_image(&mut self, button: &HtmlElement) -> Option<()> {
+    fn upload_image(&mut self, link: Scope<Self>, button: &HtmlElement) -> Option<()> {
+        // Disallow uploading until we have attempted to build a database
+        self.db.as_ref()?;
         let button_style = button.style();
         let input = document()
             .create_element("input")
@@ -107,9 +131,7 @@ impl App {
                                 let _ = button_style
                                     .set_property("background-image", &format!("url(\"{url}\")"));
                             }
-                            // TODO: spawn a future that gets an array_buffer
-                            // and when we get that array buffer, store it in
-                            // local storage for now
+                            link.send_future(store_button(file));
                         }
                     }
                 }
@@ -124,7 +146,8 @@ impl Component for App {
     type Message = Msg;
     type Properties = ();
 
-    fn create(_ctx: &Context<Self>) -> Self {
+    fn create(ctx: &Context<Self>) -> Self {
+        ctx.link().send_future(build_database());
         Default::default()
     }
 
@@ -137,7 +160,7 @@ impl Component for App {
         }
     }
 
-    fn update(&mut self, _ctx: &Context<Self>, msg: Self::Message) -> bool {
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         use ClickAction::*;
 
         match msg {
@@ -153,9 +176,14 @@ impl Component for App {
                 action: ChooseImage,
                 button,
             })) => {
-                self.upload_image(&button);
+                self.upload_image(ctx.link().clone(), &button);
                 true
             }
+            Msg::DbBuilt(result) => {
+                self.db = Some(result);
+                false
+            }
+            Msg::ButtonStored(_) => false, // TODO
         }
     }
 }

@@ -575,6 +575,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "idb"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2764bba4203538c2ef2d733d5bad8fdb4622b1ebc5560831279db7b3be1332e8"
+dependencies = [
+ "js-sys",
+ "num-traits",
+ "thiserror",
+ "tokio",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "implicit-clone"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -644,6 +658,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
 dependencies = [
  "adler2",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
@@ -797,6 +820,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5b9d34b8991d19d98081b46eacdd8eb58c6f2b201139f7c5f643cc155a633af"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "rexie"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "887466cfa8a12c08ee4b174998135cea8ff0fd84858627cd793e56535a045bc9"
+dependencies = [
+ "idb",
+ "thiserror",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1014,7 +1048,9 @@ version = "0.1.0"
 dependencies = [
  "gloo-events 0.2.0",
  "gloo-utils 0.2.0",
+ "rexie",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "yew",
 ]
