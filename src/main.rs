@@ -12,7 +12,7 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    rexie::{Error as RexieError, ObjectStore, Rexie, Transaction, TransactionMode},
+    rexie::{Error as RexieError, Index, ObjectStore, Rexie, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
     web_sys::{File, HtmlElement, HtmlInputElement, Url},
     yew::{html::Scope, prelude::*},
@@ -28,7 +28,9 @@ async fn build_database() -> Msg {
             .add_object_store(
                 ObjectStore::new(BUTTONS)
                     .key_path("id")
-                    .auto_increment(true),
+                    .auto_increment(true)
+                    .add_index(Index::new_array("file", ["name", "lastModified", "size", "type"]).unique(true)),
+                
             )
             .build()
             .await,
