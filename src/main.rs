@@ -73,7 +73,6 @@ enum ClickAction {
 }
 
 struct Click {
-    button: HtmlElement,
     action: ClickAction,
 }
 
@@ -100,13 +99,8 @@ impl TryFrom<&MouseEvent> for Click {
     type Error = ClickError;
 
     fn try_from(m: &MouseEvent) -> ClickAttempt {
-        let button = m
-            .target()
-            .ok_or(ClickError::NoTarget)?
-            .dyn_into::<HtmlElement>()
-            .map_err(|_| ClickError::NotHtmlElement)?;
         let action = m.into();
-        Ok(Click { button, action })
+        Ok(Click { action })
     }
 }
 
@@ -117,8 +111,7 @@ fn clicked(m: MouseEvent) -> Msg {
 static STORE_NAMES: [&str; 1] = [BUTTONS];
 
 impl App {
-    fn upload_image(&mut self, link: Scope<Self>, button: &HtmlElement) -> Option<()> {
-        let button_style = button.style();
+    fn upload_image(&mut self, link: Scope<Self>) -> Option<()> {
         let input = document()
             .create_element("input")
             .ok()?
@@ -135,10 +128,6 @@ impl App {
                 if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
                     if let Some(files) = input.files() {
                         if let Some(file) = files.get(0) {
-                            if let Ok(url) = Url::create_object_url_with_blob(&file) {
-                                let _ = button_style
-                                    .set_property("background-image", &format!("url(\"{url}\")"));
-                            }
                             link.send_message(Msg::StoreButton(file));
                         }
                     }
@@ -147,6 +136,10 @@ impl App {
         }));
         input.click();
         None
+    }
+
+    fn add_custom_button(&mut self, url: String) {
+        self.button.add_custom(url);
     }
 }
 
@@ -181,6 +174,16 @@ struct Button {
 impl Button {
     fn incr(&mut self) {
         self.button_face.incr(&self.custom_faces)
+    }
+
+    fn add_custom(&mut self, url: String) {
+        match self.custom_faces.iter().position(|face| face == &url) {
+            Some(i) => self.button_face = ButtonFace::Custom(i),
+            None => {
+                self.button_face = ButtonFace::Custom(self.custom_faces.len());
+                self.custom_faces.push(url);
+            }
+        }
     }
 
     fn class_and_style(&self) -> (&'static str, Option<String>) {
@@ -229,24 +232,26 @@ impl Component for App {
 
         match msg {
             Msg::Clicked(Err(_e)) => false, // TODO
-            Msg::Clicked(Ok(Click { action: Flip, .. })) => {
+            Msg::Clicked(Ok(Click { action: Flip })) => {
                 self.button.incr();
                 true
             }
             Msg::Clicked(Ok(Click {
                 action: ChooseImage,
-                button,
             })) => {
-                self.upload_image(ctx.link().clone(), &button);
+                self.upload_image(ctx.link().clone());
                 true
             }
             Msg::StoreButton(file) => {
+                if let Ok(url) = Url::create_object_url_with_blob(&file) {
+                    self.add_custom_button(url);
+                }
                 if let Some(Ok(db)) = &self.db {
                     if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
                         ctx.link().send_future(store_button(t, file));
                     }
                 }
-                false
+                true
             }
             Msg::DbBuilt(result) => {
                 self.db = Some(result);
