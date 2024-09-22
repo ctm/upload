@@ -1,18 +1,12 @@
 // This code currently stores buttons that people click on, but
-// doesn't read from the store.  It also doesn't have a way to cycle
-// back to circle-b and the narcoleptic dinosaur after an image is
-// added.
-//
-// So, really we need to introduce a buttons Vec<String> and then have the
-// ability of a click to shift through each of those strings, then to pull
-// the
+// doesn't read from the store.
 
 use {
     gloo_events::EventListener,
     gloo_utils::document,
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
-    web_sys::{File, HtmlElement, HtmlInputElement, Url},
+    web_sys::{File, HtmlInputElement, Url},
     yew::{html::Scope, prelude::*},
 };
 
@@ -62,24 +56,13 @@ struct App {
     button: Button,
 }
 
-enum ClickError {
-    NoTarget,
-    NotHtmlElement,
-}
-
 enum ClickAction {
     Flip,
     ChooseImage,
 }
 
-struct Click {
-    action: ClickAction,
-}
-
-type ClickAttempt = Result<Click, ClickError>;
-
-impl From<&MouseEvent> for ClickAction {
-    fn from(event: &MouseEvent) -> Self {
+impl From<MouseEvent> for ClickAction {
+    fn from(event: MouseEvent) -> Self {
         if event.shift_key() {
             Self::ChooseImage
         } else {
@@ -90,22 +73,15 @@ impl From<&MouseEvent> for ClickAction {
 
 enum Msg {
     DbBuilt(Result<Rexie, RexieError>),
-    Clicked(ClickAttempt),
+    Clicked(ClickAction),
     StoreButton(File),
     ButtonStored(Result<(), RexieError>),
 }
 
-impl TryFrom<&MouseEvent> for Click {
-    type Error = ClickError;
-
-    fn try_from(m: &MouseEvent) -> ClickAttempt {
-        let action = m.into();
-        Ok(Click { action })
+impl From<MouseEvent> for Msg {
+    fn from(event: MouseEvent) -> Self {
+        Msg::Clicked(event.into())
     }
-}
-
-fn clicked(m: MouseEvent) -> Msg {
-    Msg::Clicked((&m).try_into())
 }
 
 static STORE_NAMES: [&str; 1] = [BUTTONS];
@@ -204,7 +180,7 @@ impl Button {
 
     // Button should probably be an actual Component
     fn view(&self, link: &Scope<App>) -> Html {
-        let onclick: Callback<MouseEvent> = link.callback(clicked);
+        let onclick: Callback<MouseEvent> = link.callback(Into::<Msg>::into);
         let (class, style) = self.class_and_style();
         html! {
             <div class={"button"}>
@@ -231,14 +207,11 @@ impl Component for App {
         use ClickAction::*;
 
         match msg {
-            Msg::Clicked(Err(_e)) => false, // TODO
-            Msg::Clicked(Ok(Click { action: Flip })) => {
+            Msg::Clicked(Flip) => {
                 self.button.incr();
                 true
             }
-            Msg::Clicked(Ok(Click {
-                action: ChooseImage,
-            })) => {
+            Msg::Clicked(ChooseImage) => {
                 self.upload_image(ctx.link().clone());
                 true
             }
