@@ -1,36 +1,38 @@
-// See https://github.com/rustwasm/wasm-bindgen/issues/2551 for useful stuff
-// https://github.com/devashishdxt/rexie
+// This code currently stores buttons that people click on, but
+// doesn't read from the store.  It also doesn't have a way to cycle
+// back to circle-b and the narcoleptic dinosaur after an image is
+// added.
 //
-// Looks like rexie stores JsValues and that a Blob is a JsValue, but I
-// can't be sure.
-
-// Figure out how to save it via rexie (IndexDb for Rust)
-//
-// See https://developer.mozilla.org/en-US/docs/Web/API/File_API/Using_files_from_web_applications
-// for more info
+// So, really we need to introduce a buttons Vec<String> and then have the
+// ability of a click to shift through each of those strings, then to pull
+// the
 
 use {
     gloo_events::EventListener,
     gloo_utils::document,
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
-    web_sys::{File, HtmlElement, HtmlInputElement, IdbRequest, Url},
+    web_sys::{File, HtmlElement, HtmlInputElement, Url},
     yew::{html::Scope, prelude::*},
 };
 
-const FLIPPED: &str = "flipped";
+const DB_NAME: &str = "mb";
+const KEY: &str = "id";
+const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
 async fn build_database() -> Msg {
     Msg::DbBuilt(
-        Rexie::builder("mb")
+        Rexie::builder(DB_NAME)
             .version(1)
             .add_object_store(
                 ObjectStore::new(BUTTONS)
-                    .key_path("id")
+                    .key_path(KEY)
                     .auto_increment(true)
-                    .add_index(Index::new_array("file", ["name", "lastModified", "size", "type"]).unique(true)),
-                
+                    .add_index(
+                        Index::new_array(INDEX, ["name", "lastModified", "size", "type"])
+                            .unique(true),
+                    ),
             )
             .build()
             .await,
@@ -40,36 +42,24 @@ async fn build_database() -> Msg {
 async fn store_button(t: Transaction, file: File) -> Msg {
     async fn inner(t: Transaction, file: File) -> Result<(), RexieError> {
         let store = t.store(BUTTONS)?;
-        let add = store.add(&file, None).await
-            .inspect_err(|e| {
-                if let RexieError::IdbError(idb::Error::DomException(d)) = e {
-                    if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
-                        panic!("got it");
-                    }
+        store.add(&file, None).await.inspect_err(|e| {
+            if let RexieError::IdbError(idb::Error::DomException(d)) = e {
+                if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
+                    panic!("got it");
                 }
-            })
-            ?;
+            }
+        })?;
         t.done().await?;
         Ok(())
     }
     Msg::ButtonStored(inner(t, file).await)
 }
 
-fn toggle_flipped(button: &HtmlElement) -> Option<()> {
-    let _ = button.style().remove_property("background-image");
-    let cl = button.class_list();
-    if cl.contains(FLIPPED) {
-        let _ = cl.remove_1(FLIPPED);
-    } else {
-        let _ = cl.add_1(FLIPPED);
-    }
-    None
-}
-
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
     db: Option<Result<Rexie, RexieError>>,
+    button: Button,
 }
 
 enum ClickError {
@@ -160,6 +150,67 @@ impl App {
     }
 }
 
+#[derive(Default)]
+enum ButtonFace {
+    #[default]
+    Top,
+    Bottom,
+    Custom(usize),
+}
+
+impl ButtonFace {
+    fn incr(&mut self, faces: &[String]) {
+        use ButtonFace::*;
+
+        *self = match self {
+            Top => Bottom,
+            Bottom if faces.is_empty() => Top,
+            Bottom => Custom(0),
+            Custom(i) if *i < faces.len() - 1 => Custom(*i + 1),
+            Custom(_) => Top,
+        }
+    }
+}
+
+#[derive(Default)]
+struct Button {
+    button_face: ButtonFace,
+    custom_faces: Vec<String>,
+}
+
+impl Button {
+    fn incr(&mut self) {
+        self.button_face.incr(&self.custom_faces)
+    }
+
+    fn class_and_style(&self) -> (&'static str, Option<String>) {
+        use ButtonFace::*;
+
+        match &self.button_face {
+            Top => ("button-wrapper examine", None),
+            Bottom => ("button-wrapper examine flipped", None),
+            Custom(i) => (
+                "button-wrapper examine",
+                Some(format!(
+                    "background-image: url(\"{}\")",
+                    self.custom_faces[*i]
+                )),
+            ),
+        }
+    }
+
+    // Button should probably be an actual Component
+    fn view(&self, link: &Scope<App>) -> Html {
+        let onclick: Callback<MouseEvent> = link.callback(clicked);
+        let (class, style) = self.class_and_style();
+        html! {
+            <div class={"button"}>
+                <div {class} {style} {onclick} />
+            </div>
+        }
+    }
+}
+
 impl Component for App {
     type Message = Msg;
     type Properties = ();
@@ -170,12 +221,7 @@ impl Component for App {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let onclick: Callback<MouseEvent> = ctx.link().callback(clicked);
-        html! {
-            <div class={"button"}>
-                <div class={"button-wrapper examine"} {onclick} />
-                </div>
-        }
+        self.button.view(ctx.link())
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
@@ -183,11 +229,8 @@ impl Component for App {
 
         match msg {
             Msg::Clicked(Err(_e)) => false, // TODO
-            Msg::Clicked(Ok(Click {
-                action: Flip,
-                button,
-            })) => {
-                toggle_flipped(&button);
+            Msg::Clicked(Ok(Click { action: Flip, .. })) => {
+                self.button.incr();
                 true
             }
             Msg::Clicked(Ok(Click {
