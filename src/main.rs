@@ -14,7 +14,7 @@ use {
     gloo_utils::document,
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
-    web_sys::{File, HtmlElement, HtmlInputElement, Url},
+    web_sys::{File, HtmlElement, HtmlInputElement, IdbRequest, Url},
     yew::{html::Scope, prelude::*},
 };
 
@@ -40,7 +40,15 @@ async fn build_database() -> Msg {
 async fn store_button(t: Transaction, file: File) -> Msg {
     async fn inner(t: Transaction, file: File) -> Result<(), RexieError> {
         let store = t.store(BUTTONS)?;
-        store.add(&file, None).await?;
+        let add = store.add(&file, None).await
+            .inspect_err(|e| {
+                if let RexieError::IdbError(idb::Error::DomException(d)) = e {
+                    if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
+                        panic!("got it");
+                    }
+                }
+            })
+            ?;
         t.done().await?;
         Ok(())
     }
