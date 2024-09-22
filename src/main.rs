@@ -1,12 +1,10 @@
-// This code currently stores buttons that people click on, but
-// doesn't read from the store.
-
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    rexie::{Error as RexieError, Index, ObjectStore, Rexie, Transaction, TransactionMode},
+    rexie::{Error as RexieError, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
+    std::future::Future,
     wasm_bindgen::JsCast,
-    web_sys::{File, HtmlInputElement, Url},
+    web_sys::{Blob, File, HtmlInputElement, Url},
     yew::{html::Scope, prelude::*},
 };
 
@@ -31,6 +29,27 @@ async fn build_database() -> Msg {
             .build()
             .await,
     )
+}
+
+async fn delme(store: Store) -> Msg {
+    Msg::ButtonsRead(store.get_all(None, None).await.map(|blobs| {
+        blobs
+            .into_iter()
+            // TODO: filter_map silently discards items we can't turn into
+            // an object_url.  It probably makes sense to return an error.
+            .filter_map(|j| {
+                let blob = j.unchecked_ref::<Blob>();
+                Url::create_object_url_with_blob(blob).ok()
+            })
+            .collect()
+    }))
+}
+
+fn read_buttons_setup(db: &Rexie) -> Result<impl Future<Output = Msg>, RexieError> {
+    let store = db
+        .transaction(&STORE_NAMES, TransactionMode::ReadOnly)?
+        .store(BUTTONS)?;
+    Ok(delme(store))
 }
 
 async fn store_button(t: Transaction, file: File) -> Msg {
@@ -73,6 +92,7 @@ impl From<MouseEvent> for ClickAction {
 
 enum Msg {
     DbBuilt(Result<Rexie, RexieError>),
+    ButtonsRead(Result<Vec<String>, RexieError>),
     Clicked(ClickAction),
     StoreButton(File),
     ButtonStored(Result<(), RexieError>),
@@ -162,6 +182,16 @@ impl Button {
         }
     }
 
+    fn add(&mut self, mut buttons: Vec<String>) -> bool {
+        if buttons.is_empty() {
+            false
+        } else {
+            self.button_face = ButtonFace::Custom(self.custom_faces.len());
+            self.custom_faces.append(&mut buttons);
+            true
+        }
+    }
+
     fn class_and_style(&self) -> (&'static str, Option<String>) {
         use ButtonFace::*;
 
@@ -204,18 +234,18 @@ impl Component for App {
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        use ClickAction::*;
+        use {ClickAction::*, Msg::*};
 
         match msg {
-            Msg::Clicked(Flip) => {
+            Clicked(Flip) => {
                 self.button.incr();
                 true
             }
-            Msg::Clicked(ChooseImage) => {
+            Clicked(ChooseImage) => {
                 self.upload_image(ctx.link().clone());
                 true
             }
-            Msg::StoreButton(file) => {
+            StoreButton(file) => {
                 if let Ok(url) = Url::create_object_url_with_blob(&file) {
                     self.add_custom_button(url);
                 }
@@ -226,11 +256,19 @@ impl Component for App {
                 }
                 true
             }
-            Msg::DbBuilt(result) => {
+            DbBuilt(result) => {
+                if let Ok(db) = &result {
+                    match read_buttons_setup(db) {
+                        Ok(read_buttons) => ctx.link().send_future(read_buttons),
+                        Err(_e) => {} // TODO
+                    }
+                }
                 self.db = Some(result);
                 false
             }
             Msg::ButtonStored(_) => false, // TODO
+            ButtonsRead(Err(_e)) => false, // TODO
+            ButtonsRead(Ok(buttons)) => self.button.add(buttons),
         }
     }
 }
