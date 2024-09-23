@@ -1,6 +1,7 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
+    log::error,
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
@@ -26,14 +27,14 @@ async fn build_database(link: Scope<App>) {
         .build()
         .await
     {
-        Err(e) => log::error!("Could not build buttons database: {e}"),
+        Err(e) => error!("Could not build buttons database: {e}"),
         Ok(db) => link.send_message(Msg::DbBuilt(db)),
     }
 }
 
 async fn read_buttons(store: Store, link: Scope<App>) {
     match store.get_all(None, None).await {
-        Err(e) => log::error!("reading buttons failed: {e:?}"),
+        Err(e) => error!("reading buttons failed: {e:?}"),
         Ok(blobs) => {
             let buttons = blobs
                 .into_iter()
@@ -53,14 +54,14 @@ fn read_buttons_setup(db: &Rexie, link: Scope<App>) {
     let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
         Ok(t) => t,
         Err(e) => {
-            log::error!("Can't create transaction to read buttons: {e:?}");
+            error!("Can't create transaction to read buttons: {e:?}");
             return;
         }
     };
     let store = match transaction.store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Can't get store to read buttons: {e:?}");
+            error!("Can't get store to read buttons: {e:?}");
             return;
         }
     };
@@ -73,7 +74,7 @@ async fn store_button(t: Transaction, file: File) -> Msg {
         store.add(&file, None).await.inspect_err(|e| {
             if let RexieError::IdbError(idb::Error::DomException(d)) = e {
                 if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
-                    panic!("got it");
+                    log::info!("That button is already stored");
                 }
             }
         })?;
