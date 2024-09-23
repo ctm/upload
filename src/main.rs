@@ -129,20 +129,35 @@ impl From<MouseEvent> for Msg {
 static STORE_NAMES: [&str; 1] = [BUTTONS];
 
 impl App {
-    // TODO: upload_image should error! when something fails
-    fn upload_image(&mut self, link: Scope<Self>) -> Option<()> {
-        let input = document()
-            .create_element("input")
-            .ok()?
-            .dyn_into::<HtmlInputElement>()
-            .ok()?;
-        input.set_attribute("type", "file").ok()?;
-        input.set_attribute("accept", "image/*").ok()?;
+    fn upload_image(&mut self, link: Scope<Self>) {
+        let element = match document().create_element("input") {
+            Ok(element) => element,
+            Err(e) => {
+                error!("Could not create input element: {e:?}");
+                return;
+            }
+        };
+        let input = match element.dyn_into::<HtmlInputElement>() {
+            Ok(input) => input,
+            Err(input) => {
+                error!("Could not turn {input:?} into HtmlInputElement");
+                return;
+            }
+        };
+        if let Err(e) = input.set_attribute("type", "file") {
+            error!("Could not set {input:?}'s type to file: {e:?}");
+            return;
+        }
+        if let Err(e) = input.set_attribute("accept", "image/*") {
+            error!("Could not set {input:?}'s accept to image/*: {e:?}");
+            return;
+        }
         // NOTE: we never attempt to set change_listener back to None,
         // because there's not much of a leak if we leave it in place,
         // since if we create a new listener, it'll overwrite--and
         // hence drop--the old one.
         self.change_listener = Some(EventListener::once(&input, "change", move |e: &Event| {
+            // TODO: complain when things fail
             if let Some(target) = e.target() {
                 if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
                     if let Some(files) = input.files() {
@@ -154,7 +169,6 @@ impl App {
             }
         }));
         input.click();
-        None
     }
 
     fn add_custom_button(&mut self, url: String) {
