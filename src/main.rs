@@ -2,7 +2,6 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
-    std::future::Future,
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
@@ -32,25 +31,40 @@ async fn build_database(link: Scope<App>) {
     }
 }
 
-async fn delme(store: Store) -> Msg {
-    Msg::ButtonsRead(store.get_all(None, None).await.map(|blobs| {
-        blobs
-            .into_iter()
-            // TODO: filter_map silently discards items we can't turn into
-            // an object_url.  It probably makes sense to return an error.
-            .filter_map(|j| {
-                let blob = j.unchecked_ref::<Blob>();
-                Url::create_object_url_with_blob(blob).ok()
-            })
-            .collect()
-    }))
+async fn read_buttons(store: Store, link: Scope<App>) {
+    match store.get_all(None, None).await {
+        Err(e) => log::error!("reading buttons failed: {e:?}"),
+        Ok(blobs) => {
+            let buttons = blobs
+                .into_iter()
+                // TODO: filter_map silently discards items we can't turn into
+                // an object_url.  It probably makes sense to return an error.
+                .filter_map(|j| {
+                    let blob = j.unchecked_ref::<Blob>();
+                    Url::create_object_url_with_blob(blob).ok()
+                })
+                .collect();
+            link.send_message(Msg::ButtonsRead(buttons));
+        }
+    }
 }
 
-fn read_buttons_setup(db: &Rexie) -> Result<impl Future<Output = Msg>, RexieError> {
-    let store = db
-        .transaction(&STORE_NAMES, TransactionMode::ReadOnly)?
-        .store(BUTTONS)?;
-    Ok(delme(store))
+fn read_buttons_setup(db: &Rexie, link: Scope<App>) {
+    let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("Can't create transaction to read buttons: {e:?}");
+            return;
+        }
+    };
+    let store = match transaction.store(BUTTONS) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Can't get store to read buttons: {e:?}");
+            return;
+        }
+    };
+    spawn_local(read_buttons(store, link));
 }
 
 async fn store_button(t: Transaction, file: File) -> Msg {
@@ -93,7 +107,7 @@ impl From<MouseEvent> for ClickAction {
 
 enum Msg {
     DbBuilt(Rexie),
-    ButtonsRead(Result<Vec<String>, RexieError>),
+    ButtonsRead(Vec<String>),
     Clicked(ClickAction),
     StoreButton(File),
     ButtonStored(Result<(), RexieError>),
@@ -258,16 +272,12 @@ impl Component for App {
                 true
             }
             DbBuilt(db) => {
-                match read_buttons_setup(&db) {
-                    Ok(read_buttons) => ctx.link().send_future(read_buttons),
-                    Err(_e) => {} // TODO
-                }
+                read_buttons_setup(&db, ctx.link().clone());
                 self.db = Some(db);
                 false
             }
             Msg::ButtonStored(_) => false, // TODO
-            ButtonsRead(Err(_e)) => false, // TODO
-            ButtonsRead(Ok(buttons)) => self.button.add(buttons),
+            ButtonsRead(buttons) => self.button.add(buttons),
         }
     }
 }
