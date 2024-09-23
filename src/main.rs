@@ -2,7 +2,7 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     log::{error, info},
-    rexie::{Error as RexieError, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
+    rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
@@ -32,7 +32,7 @@ async fn build_database(link: Scope<App>) {
     }
 }
 
-async fn read_buttons(store: Store, link: Scope<App>) {
+async fn async_read_buttons(store: Store, link: Scope<App>) {
     match store.get_all(None, None).await {
         Err(e) => error!("reading buttons failed: {e:?}"),
         Ok(files) => {
@@ -53,7 +53,7 @@ async fn read_buttons(store: Store, link: Scope<App>) {
     }
 }
 
-fn read_buttons_setup(db: &Rexie, link: Scope<App>) {
+fn read_buttons(db: &Rexie, link: Scope<App>) {
     let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
         Ok(t) => t,
         Err(e) => {
@@ -68,10 +68,20 @@ fn read_buttons_setup(db: &Rexie, link: Scope<App>) {
             return;
         }
     };
-    spawn_local(read_buttons(store, link));
+    spawn_local(async_read_buttons(store, link));
 }
 
-// TODO: can split this into store_button_setup
+// If we wanted to, we could split this into a non-async store_button
+// and an async async_store_button, like we do with read_buttons and
+// async_read_buttons above.  The upside to doing the split is that
+// nothing has to be added to the executor in the case where there's
+// an error before anything async is called. That's not much of an
+// upside though if the error is unlikely to occur and time isn't
+// critical.
+//
+// So, the reason read_buttons is split and store_button isn't is just
+// due to me fooling around, since I'm not particularly proficient in
+// async rust.
 async fn store_button(t: Transaction, file: File) {
     let store = match t.store(BUTTONS) {
         Ok(s) => s,
@@ -81,7 +91,9 @@ async fn store_button(t: Transaction, file: File) {
         }
     };
     let _ = store.add(&file, None).await.inspect_err(|e| {
-        if let RexieError::IdbError(idb::Error::DomException(d)) = e {
+        if let Error::IdbError(idb::Error::DomException(d)) = e {
+            // I am not particularly happy about this code to detect a
+            // uniqueness constraint violation, but it appears to work
             if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
                 info!("That button is already stored");
             }
@@ -152,10 +164,12 @@ impl App {
             error!("Could not set {input:?}'s accept to image/*: {e:?}");
             return;
         }
-        // NOTE: we never attempt to set change_listener back to None,
-        // because there's not much of a leak if we leave it in place,
-        // since if we create a new listener, it'll overwrite--and
-        // hence drop--the old one.
+        // NOTE: don't bother setting change_listener back to None,
+        // after the handler has been triggered, because there's not
+        // much of a leak if we leave it in place.  After all, if we
+        // create a new listener, it'll overwrite--and hence drop--the
+        // old one, so at most we waste the space of one unneeded
+        // listener.
         self.change_listener = Some(EventListener::once(
             &input,
             "change",
@@ -253,7 +267,8 @@ impl Button {
         }
     }
 
-    // Button should probably be an actual Component
+    // Perhaps Button should be an actual Component itself, but since
+    // this is just me futzing around with rexie, I didn't bother.
     fn view(&self, link: &Scope<App>) -> Html {
         let onclick: Callback<MouseEvent> = link.callback(Into::<Msg>::into);
         let (class, style) = self.class_and_style();
@@ -302,7 +317,7 @@ impl Component for App {
                 true
             }
             DbBuilt(db) => {
-                read_buttons_setup(&db, ctx.link().clone());
+                read_buttons(&db, ctx.link().clone());
                 self.db = Some(db);
                 false
             }
