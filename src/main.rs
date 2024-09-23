@@ -5,7 +5,7 @@ use {
     std::future::Future,
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
-    yew::{html::Scope, prelude::*},
+    yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
 const DB_NAME: &str = "mb";
@@ -13,22 +13,23 @@ const KEY: &str = "id";
 const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
-async fn build_database() -> Msg {
-    Msg::DbBuilt(
-        Rexie::builder(DB_NAME)
-            .version(1)
-            .add_object_store(
-                ObjectStore::new(BUTTONS)
-                    .key_path(KEY)
-                    .auto_increment(true)
-                    .add_index(
-                        Index::new_array(INDEX, ["name", "lastModified", "size", "type"])
-                            .unique(true),
-                    ),
-            )
-            .build()
-            .await,
-    )
+async fn build_database(link: Scope<App>) {
+    match Rexie::builder(DB_NAME)
+        .version(1)
+        .add_object_store(
+            ObjectStore::new(BUTTONS)
+                .key_path(KEY)
+                .auto_increment(true)
+                .add_index(
+                    Index::new_array(INDEX, ["name", "lastModified", "size", "type"]).unique(true),
+                ),
+        )
+        .build()
+        .await
+    {
+        Err(e) => log::error!("Could not build buttons database: {e}"),
+        Ok(db) => link.send_message(Msg::DbBuilt(db)),
+    }
 }
 
 async fn delme(store: Store) -> Msg {
@@ -71,7 +72,7 @@ async fn store_button(t: Transaction, file: File) -> Msg {
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
-    db: Option<Result<Rexie, RexieError>>,
+    db: Option<Rexie>,
     button: Button,
 }
 
@@ -91,7 +92,7 @@ impl From<MouseEvent> for ClickAction {
 }
 
 enum Msg {
-    DbBuilt(Result<Rexie, RexieError>),
+    DbBuilt(Rexie),
     ButtonsRead(Result<Vec<String>, RexieError>),
     Clicked(ClickAction),
     StoreButton(File),
@@ -225,7 +226,7 @@ impl Component for App {
     type Properties = ();
 
     fn create(ctx: &Context<Self>) -> Self {
-        ctx.link().send_future(build_database());
+        spawn_local(build_database(ctx.link().clone()));
         Default::default()
     }
 
@@ -249,21 +250,19 @@ impl Component for App {
                 if let Ok(url) = Url::create_object_url_with_blob(&file) {
                     self.add_custom_button(url);
                 }
-                if let Some(Ok(db)) = &self.db {
+                if let Some(db) = &self.db {
                     if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
                         ctx.link().send_future(store_button(t, file));
                     }
                 }
                 true
             }
-            DbBuilt(result) => {
-                if let Ok(db) = &result {
-                    match read_buttons_setup(db) {
-                        Ok(read_buttons) => ctx.link().send_future(read_buttons),
-                        Err(_e) => {} // TODO
-                    }
+            DbBuilt(db) => {
+                match read_buttons_setup(&db) {
+                    Ok(read_buttons) => ctx.link().send_future(read_buttons),
+                    Err(_e) => {} // TODO
                 }
-                self.db = Some(result);
+                self.db = Some(db);
                 false
             }
             Msg::ButtonStored(_) => false, // TODO
@@ -274,5 +273,6 @@ impl Component for App {
 }
 
 fn main() {
+    wasm_logger::init(wasm_logger::Config::default());
     yew::Renderer::<App>::new().render();
 }
