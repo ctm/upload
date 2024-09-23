@@ -35,14 +35,17 @@ async fn build_database(link: Scope<App>) {
 async fn read_buttons(store: Store, link: Scope<App>) {
     match store.get_all(None, None).await {
         Err(e) => error!("reading buttons failed: {e:?}"),
-        Ok(blobs) => {
-            let buttons = blobs
+        Ok(files) => {
+            let buttons = files
                 .into_iter()
-                // TODO: filter_map silently discards items we can't turn into
-                // an object_url.  It probably makes sense to return an error.
-                .filter_map(|j| {
-                    let blob = j.unchecked_ref::<Blob>();
-                    Url::create_object_url_with_blob(blob).ok()
+                .filter_map(|file| match file.dyn_ref::<Blob>() {
+                    None => {
+                        error!("Could not turn {file:?} into Blob");
+                        None
+                    }
+                    Some(blob) => Url::create_object_url_with_blob(blob)
+                        .inspect_err(|e| error!("Could not turn {blob:?} into object_url: {e:?}"))
+                        .ok(),
                 })
                 .collect();
             link.send_message(Msg::ButtonsRead(buttons));
@@ -126,6 +129,7 @@ impl From<MouseEvent> for Msg {
 static STORE_NAMES: [&str; 1] = [BUTTONS];
 
 impl App {
+    // TODO: upload_image should error! when something fails
     fn upload_image(&mut self, link: Scope<Self>) -> Option<()> {
         let input = document()
             .create_element("input")
