@@ -156,18 +156,26 @@ impl App {
         // because there's not much of a leak if we leave it in place,
         // since if we create a new listener, it'll overwrite--and
         // hence drop--the old one.
-        self.change_listener = Some(EventListener::once(&input, "change", move |e: &Event| {
-            // TODO: complain when things fail
-            if let Some(target) = e.target() {
-                if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
-                    if let Some(files) = input.files() {
-                        if let Some(file) = files.get(0) {
-                            link.send_message(Msg::StoreButton(file));
+        self.change_listener = Some(EventListener::once(
+            &input,
+            "change",
+            move |e: &Event| match e.target() {
+                None => error!("{e:?} has no target"),
+                Some(target) => match target.dyn_into::<HtmlInputElement>() {
+                    Err(target) => error!("Could not change {target:?} into HtmlInputElement"),
+                    Ok(input) => match input.files() {
+                        None => info!("No files"),
+                        Some(files) => {
+                            if let Some(file) = files.get(0) {
+                                link.send_message(Msg::StoreButton(file));
+                            } else {
+                                info!("No file selected");
+                            }
                         }
-                    }
-                }
-            }
-        }));
+                    },
+                },
+            },
+        ));
         input.click();
     }
 
