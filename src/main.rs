@@ -1,7 +1,7 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    log::error,
+    log::{error, info},
     rexie::{Error as RexieError, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
@@ -68,20 +68,24 @@ fn read_buttons_setup(db: &Rexie, link: Scope<App>) {
     spawn_local(read_buttons(store, link));
 }
 
-async fn store_button(t: Transaction, file: File) -> Msg {
-    async fn inner(t: Transaction, file: File) -> Result<(), RexieError> {
-        let store = t.store(BUTTONS)?;
-        store.add(&file, None).await.inspect_err(|e| {
-            if let RexieError::IdbError(idb::Error::DomException(d)) = e {
-                if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
-                    log::info!("That button is already stored");
-                }
+// TODO: can split this into store_button_setup
+async fn store_button(t: Transaction, file: File) {
+    let store = match t.store(BUTTONS) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Can't get store to store buttons: {e:?}");
+            return;
+        }
+    };
+    let _ = store.add(&file, None).await.inspect_err(|e| {
+        if let RexieError::IdbError(idb::Error::DomException(d)) = e {
+            if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
+                info!("That button is already stored");
             }
-        })?;
-        t.done().await?;
-        Ok(())
-    }
-    Msg::ButtonStored(inner(t, file).await)
+        } else {
+            error!("Could not store button: {e:?}");
+        }
+    });
 }
 
 #[derive(Default)]
@@ -111,7 +115,6 @@ enum Msg {
     ButtonsRead(Vec<String>),
     Clicked(ClickAction),
     StoreButton(File),
-    ButtonStored(Result<(), RexieError>),
 }
 
 impl From<MouseEvent> for Msg {
@@ -267,7 +270,7 @@ impl Component for App {
                 }
                 if let Some(db) = &self.db {
                     if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
-                        ctx.link().send_future(store_button(t, file));
+                        spawn_local(store_button(t, file));
                     }
                 }
                 true
@@ -277,7 +280,6 @@ impl Component for App {
                 self.db = Some(db);
                 false
             }
-            Msg::ButtonStored(_) => false, // TODO
             ButtonsRead(buttons) => self.button.add(buttons),
         }
     }
