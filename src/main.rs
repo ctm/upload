@@ -14,10 +14,11 @@ use {
     rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
     serde::ser::Serialize,
     serde_wasm_bindgen::Serializer,
-    std::collections::HashMap,
+    std::{collections::HashMap, rc::Rc, sync::Mutex},
     wasm_bindgen::{JsCast, JsValue},
-    web_sys::{Blob, File, HtmlInputElement, Url},
-    yew::{html::Scope, platform::spawn_local, prelude::*}
+    wasm_bindgen_futures::JsFuture,
+    web_sys::{js_sys::Uint8Array, Blob, File, HtmlInputElement, Url},
+    yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
 const DB_NAME: &str = "mb";
@@ -29,12 +30,9 @@ async fn build_database(link: Scope<App>) {
     match Rexie::builder(DB_NAME)
         .version(1)
         .add_object_store(
-            ObjectStore::new(BUTTONS)
-                .key_path(KEY)
-                .auto_increment(true)
-//                .add_index(
-//                    Index::new_array(INDEX, ["size", "type"]).unique(true),
-//                ),
+            ObjectStore::new(BUTTONS).key_path(KEY).auto_increment(true), //                .add_index(
+                                                                          //                    Index::new_array(INDEX, ["size", "type"]).unique(true),
+                                                                          //                ),
         )
         .build()
         .await
@@ -94,8 +92,48 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
 // So, the reason read_buttons is split and store_button isn't is just
 // due to me fooling around, since I'm not particularly proficient in
 // async rust.
-async fn store_button(t: Transaction, file: File) {
+async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
+    let ab = match JsFuture::from(file.array_buffer()).await {
+        Ok(ab) => ab,
+        Err(e) => {
+            error!("Could not get the array buffer for {file:?}");
+            return;
+        }
+    };
+    let ab = Uint8Array::new(&ab);
+
+    let mut myvec = vec![0; ab.length() as usize];
+    ab.copy_to(&mut myvec);
+    info!("myvec: {myvec:?}");
+
+    let t = match db.lock() {
+        Err(e) => {
+            error!("Couldn't lock db: {e:?}");
+            return;
+        }
+        Ok(db) => db.transaction(&STORE_NAMES, TransactionMode::ReadWrite),
+    };
+    let t = match t {
+        Err(e) => {
+            error!("Couldn't create transaction to store button: {e:?}");
+            return;
+        }
+        Ok(t) => t,
+    };
+
+    // It looks like running this code closes the transaction,
+    // so we need to open the transaction *after* we've done our
+    // conversion, which we can do in a two step process, *or*
+    // we can share the db with a arc around a mutex or we can
+    // "recreate" the database each time we do the store.
+    //
+    // FWIW, there's a chance that if we create the transaction in the
+    // async function that our Firefox problem goes away.
+    //
+
     info!("starting file is {file:?}");
+
+    /*
     let file = match file.dyn_into::<Blob>() { // DO NOT COMMIT -- HACK
         Ok(file) => file,
         Err(e) => {
@@ -111,7 +149,8 @@ async fn store_button(t: Transaction, file: File) {
             return;
         }
     };
-    
+
+
     info!("now file is {file:?}");
     let file = match serde_wasm_bindgen::preserve::serialize(&file, &Serializer::json_compatible()) {
         Ok(file) => file,
@@ -121,6 +160,8 @@ async fn store_button(t: Transaction, file: File) {
         }
     };
     info!("now file is {file:?}");
+    */
+
     let store = match t.store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
@@ -129,6 +170,7 @@ async fn store_button(t: Transaction, file: File) {
         }
     };
 
+    /*
     // This completely ignores the File/Blob and just uses two static
     // strings and succeeds.  Unfortunately, I cant use .serialize()
     // with Blobs and I can't use preserve::serialize() with HashMaps.
@@ -140,8 +182,18 @@ async fn store_button(t: Transaction, file: File) {
     let file = file.serialize(&Serializer::json_compatible()).unwrap();
     info!("now file is {file:?}");
 
+    */
+
+    let hack: HashMap<&'static str, Vec<u8>> = [("content", myvec)].into();
+    let hack = hack.serialize(&Serializer::json_compatible()).unwrap();
+    info!("now hack is {hack:?}");
+
+    log::info!("about to add");
+    log::info!("added {:?}", store.add(&hack, None).await);
+
     log::info!("about to call add");
-    match store.put(&file, None).await { // DO NOT COMMIT
+    match store.add(&file, None).await {
+        // DO NOT COMMIT
         Ok(i) => {
             log::info!("i: {i:?}");
             // Do not call done if store failed, because we'll get a panic.
@@ -167,7 +219,7 @@ async fn store_button(t: Transaction, file: File) {
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
-    db: Option<Rexie>,
+    db: Option<Rc<Mutex<Rexie>>>,
     button: Button,
 }
 
@@ -371,15 +423,13 @@ impl Component for App {
                     self.add_custom_button(url);
                 }
                 if let Some(db) = &self.db {
-                    if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
-                        spawn_local(store_button(t, file));
-                    }
+                    spawn_local(store_button(db.clone(), file));
                 }
                 true
             }
             DbBuilt(db) => {
                 read_buttons(&db, ctx.link().clone());
-                self.db = Some(db);
+                self.db = Some(Rc::new(Mutex::new(db)));
                 false
             }
             ButtonsRead(buttons) => self.button.add(buttons),
