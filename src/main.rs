@@ -170,29 +170,21 @@ async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
         }
     };
 
-    /*
-    // This completely ignores the File/Blob and just uses two static
-    // strings and succeeds.  Unfortunately, I cant use .serialize()
-    // with Blobs and I can't use preserve::serialize() with HashMaps.
-    // So, if I want to be sure to get something that works, I need to
-    // turn the Blob into something I can serialize, which can be
-    // done, but is more hoop jumping.
-
-    let file: HashMap<&'static str, &'static str> = [("content", "test2")].into();
-    let file = file.serialize(&Serializer::json_compatible()).unwrap();
-    info!("now file is {file:?}");
-
-    */
-
+    // let hack: HashMap<&'static str, Vec<u8>> = [("content", myvec)].into();
     let hack: HashMap<&'static str, Vec<u8>> = [("content", myvec)].into();
     let hack = hack.serialize(&Serializer::json_compatible()).unwrap();
     info!("now hack is {hack:?}");
 
     log::info!("about to add");
-    log::info!("added {:?}", store.add(&hack, None).await);
+    let s = store.add(&hack, None).await;
+    log::info!("added {:?}", s);
 
+    /*
     log::info!("about to call add");
-    match store.add(&file, None).await {
+    match store.add(&file, None).await
+     */
+    
+    match s {
         // DO NOT COMMIT
         Ok(i) => {
             log::info!("i: {i:?}");
