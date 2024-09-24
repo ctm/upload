@@ -1051,6 +1051,7 @@ dependencies = [
  "idb",
  "log",
  "rexie",
+ "serde-wasm-bindgen 0.6.5",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

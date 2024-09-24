@@ -8,13 +8,7 @@
 // FWIW, this code works fine with Brave, Edge and Safari. :-(
 
 use {
-    gloo_events::EventListener,
-    gloo_utils::document,
-    log::{error, info},
-    rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
-    wasm_bindgen::JsCast,
-    web_sys::{Blob, File, HtmlInputElement, Url},
-    yew::{html::Scope, platform::spawn_local, prelude::*},
+    gloo_events::EventListener, gloo_utils::document, log::{error, info}, rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode}, serde_wasm_bindgen::Serializer, wasm_bindgen::{JsCast, JsValue}, web_sys::{Blob, File, HtmlInputElement, Url}, yew::{html::Scope, platform::spawn_local, prelude::*}
 };
 
 const DB_NAME: &str = "mb";
@@ -29,9 +23,9 @@ async fn build_database(link: Scope<App>) {
             ObjectStore::new(BUTTONS)
                 .key_path(KEY)
                 .auto_increment(true)
-                .add_index(
-                    Index::new_array(INDEX, ["name", "lastModified", "size", "type"]).unique(true),
-                ),
+//                .add_index(
+//                    Index::new_array(INDEX, ["size", "type"]).unique(true),
+//                ),
         )
         .build()
         .await
@@ -92,6 +86,32 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
 // due to me fooling around, since I'm not particularly proficient in
 // async rust.
 async fn store_button(t: Transaction, file: File) {
+    info!("starting file is {file:?}");
+    let file = match file.dyn_into::<Blob>() { // DO NOT COMMIT -- HACK
+        Ok(file) => file,
+        Err(e) => {
+            error!("Can't convert {e:?} into Blob");
+            return;
+        }
+    };
+
+    let file = match file.slice() {
+        Ok(file) => file,
+        Err(e) => {
+            error!("new_with_blob_sequence failed: {e:?} into Blob");
+            return;
+        }
+    };
+    
+    info!("now file is {file:?}");
+    let file = match serde_wasm_bindgen::preserve::serialize(&file, &Serializer::json_compatible()) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Can't serialize {file:?}: {e:?}");
+            return;
+        }
+    };
+    info!("now file is {file:?}");
     let store = match t.store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
@@ -99,14 +119,17 @@ async fn store_button(t: Transaction, file: File) {
             return;
         }
     };
-    match store.add(&file, None).await {
-        Ok(_) => {
+    log::info!("about to call add");
+    match store.put(&file, None).await { // DO NOT COMMIT
+        Ok(i) => {
+            log::info!("i: {i:?}");
             // Do not call done if store failed, because we'll get a panic.
             if let Err(e) = t.done().await {
                 error!("Could not complete button storage transaction: {e:?}");
             }
         }
         Err(e) => {
+            log::info!("e: {e:?}");
             if let Error::IdbError(idb::Error::DomException(d)) = e {
                 // I am not particularly happy about this code to detect a
                 // uniqueness constraint violation, but it appears to work
@@ -345,5 +368,6 @@ impl Component for App {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
+    log::info!("test of logging");
     yew::Renderer::<App>::new().render();
 }
