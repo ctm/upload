@@ -90,17 +90,25 @@ async fn store_button(t: Transaction, file: File) {
             return;
         }
     };
-    let _ = store.add(&file, None).await.inspect_err(|e| {
-        if let Error::IdbError(idb::Error::DomException(d)) = e {
-            // I am not particularly happy about this code to detect a
-            // uniqueness constraint violation, but it appears to work
-            if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
-                info!("That button is already stored");
+    match store.add(&file, None).await {
+        Ok(_) => {
+            // Do not call done if store failed, because we'll get a panic.
+            if let Err(e) = t.done().await {
+                error!("Could not complete button storage transaction: {e:?}");
             }
-        } else {
-            error!("Could not store button: {e:?}");
         }
-    });
+        Err(e) => {
+            if let Error::IdbError(idb::Error::DomException(d)) = e {
+                // I am not particularly happy about this code to detect a
+                // uniqueness constraint violation, but it appears to work
+                if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
+                    info!("That button is already stored");
+                }
+            } else {
+                error!("Could not store button: {e:?}");
+            }
+        }
+    }
 }
 
 #[derive(Default)]
