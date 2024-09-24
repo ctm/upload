@@ -8,7 +8,16 @@
 // FWIW, this code works fine with Brave, Edge and Safari. :-(
 
 use {
-    gloo_events::EventListener, gloo_utils::document, log::{error, info}, rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode}, serde_wasm_bindgen::Serializer, wasm_bindgen::{JsCast, JsValue}, web_sys::{Blob, File, HtmlInputElement, Url}, yew::{html::Scope, platform::spawn_local, prelude::*}
+    gloo_events::EventListener,
+    gloo_utils::document,
+    log::{error, info},
+    rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
+    serde::ser::Serialize,
+    serde_wasm_bindgen::Serializer,
+    std::collections::HashMap,
+    wasm_bindgen::{JsCast, JsValue},
+    web_sys::{Blob, File, HtmlInputElement, Url},
+    yew::{html::Scope, platform::spawn_local, prelude::*}
 };
 
 const DB_NAME: &str = "mb";
@@ -119,6 +128,18 @@ async fn store_button(t: Transaction, file: File) {
             return;
         }
     };
+
+    // This completely ignores the File/Blob and just uses two static
+    // strings and succeeds.  Unfortunately, I cant use .serialize()
+    // with Blobs and I can't use preserve::serialize() with HashMaps.
+    // So, if I want to be sure to get something that works, I need to
+    // turn the Blob into something I can serialize, which can be
+    // done, but is more hoop jumping.
+
+    let file: HashMap<&'static str, &'static str> = [("content", "test2")].into();
+    let file = file.serialize(&Serializer::json_compatible()).unwrap();
+    info!("now file is {file:?}");
+
     log::info!("about to call add");
     match store.put(&file, None).await { // DO NOT COMMIT
         Ok(i) => {
