@@ -12,8 +12,7 @@ use {
     gloo_utils::document,
     log::{error, info},
     rexie::{Error, Index, ObjectStore, Rexie, Store, TransactionMode},
-    serde::ser::Serialize,
-    serde_json::json,
+    serde::Serialize,
     serde_wasm_bindgen::Serializer,
     std::{rc::Rc, sync::Mutex},
     wasm_bindgen::JsCast,
@@ -85,29 +84,56 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
     spawn_local(async_read_buttons(store, link));
 }
 
-// If we wanted to, we could split this into a non-async store_button
-// and an async async_store_button, like we do with read_buttons and
-// async_read_buttons above.  The upside to doing the split is that
-// nothing has to be added to the executor in the case where there's
-// an error before anything async is called. That's not much of an
-// upside though if the error is unlikely to occur and time isn't
-// critical.
+// This struct is needed when using rexie to store web_sys::Files
+// under Firefox.  No conversion is needed under Brave, Edge, and
+// Safari, but calling store.add or store.put with a File or Blob
+// never completes under Firefox.  This *may* be a bug in Rexie or it
+// may be a bug in Firefox, or it may be a lack of functionality in
+// Firefox (although hanging, rather than reporting an error strongly
+// suggests it's a bug _somewhere_.
 //
-// So, the reason read_buttons is split and store_button isn't is just
-// due to me fooling around, since I'm not particularly proficient in
-// async rust.
-async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
-    let ab = match JsFuture::from(file.array_buffer()).await {
-        Ok(ab) => ab,
-        Err(e) => {
-            error!("Could not get the array buffer for {file:?}: {e:?}");
-            return;
-        }
-    };
-    let ui8 = Uint8Array::new(&ab);
+// The workaround for Firefox is to convert the File to a Vec<u8>
+// before storing and
 
-    let mut vec_u8 = vec![0; ui8.length() as usize];
-    ui8.copy_to(&mut vec_u8);
+#[derive(Debug, Serialize)]
+struct RexieFirefoxFile {
+    blob: Vec<u8>,
+    name: String,
+    #[serde(rename = "type")]
+    type_: String,
+    size: f64, // from web_sys::Blob
+    #[serde(rename = "lastModified")]
+    last_modified: f64, // from web_sys::File
+}
+
+impl RexieFirefoxFile {
+    async fn new(file: &File) -> Option<Self> {
+        let ab = match JsFuture::from(file.array_buffer()).await {
+            Ok(ab) => ab,
+            Err(e) => {
+                error!("Could not get the array buffer for {file:?}: {e:?}");
+                return None;
+            }
+        };
+        let ui8 = Uint8Array::new(&ab);
+
+        let mut blob = vec![0; ui8.length() as usize];
+        ui8.copy_to(&mut blob);
+        Some(Self {
+            blob,
+            name: file.name(),
+            type_: file.type_(),
+            size: file.size(),
+            last_modified: file.last_modified(),
+        })
+    }
+}
+
+async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
+    let file = match RexieFirefoxFile::new(&file).await {
+        Some(f) => f,
+        None => return,
+    };
 
     let t_result = match db.lock() {
         Err(e) => {
@@ -132,15 +158,13 @@ async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
         }
     };
 
-    let obj = json!({
-        "name": file.name(),
-        "type": file.type_(),
-        "size": file.size(),
-        "lastModified": file.last_modified(),
-        "blob": vec_u8,
-    })
-    .serialize(&Serializer::json_compatible())
-    .unwrap();
+    let obj = match file.serialize(&Serializer::json_compatible()) {
+        Ok(o) => o,
+        Err(e) => {
+            error!("Could not serialize {file:?}: {e:?}");
+            return;
+        }
+    };
 
     match store.add(&obj, None).await {
         Ok(_index) => {
@@ -150,7 +174,6 @@ async fn store_button(db: Rc<Mutex<Rexie>>, file: File) {
             }
         }
         Err(e) => {
-            log::info!("e: {e:?}");
             if let Error::IdbError(idb::Error::DomException(d)) = e {
                 // I am not particularly happy about this code to detect a
                 // uniqueness constraint violation, but it appears to work
@@ -387,6 +410,5 @@ impl Component for App {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
-    log::info!("test of logging");
     yew::Renderer::<App>::new().render();
 }
