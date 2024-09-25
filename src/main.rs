@@ -1,12 +1,3 @@
-// This code silently fails on Firefox.  My guess is it's related to
-// https://github.com/devashishdxt/rexie/issues/23 which suggests that
-// serializing the files cause problems.  There's a chance that I can
-// serialize the object_url instead (it's just a string) and have
-// something that works with Firefox as well, without jumping through
-// hoops to do additional serialization.
-//
-// FWIW, this code works fine with Brave, Edge and Safari. :-(
-
 use {
     gloo_events::EventListener,
     gloo_utils::document,
@@ -17,8 +8,18 @@ use {
     yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
+// NOTE: Adding a key_path will cause this demo to fail on Firefox. It
+//       will still work with Brave, Edge and Safari.  It took me
+//       quite a while to realize the problem was with the key_path.
+//       I wound up writing a version that extracts a Uint8Array from
+//       the Blob, serializes that and it was complex and slow.  I
+//       only accidentally figured out it was due to the key_path when
+//       I built a third version that uses index-db instead of rexie
+//       and it didn't use a key_path (because there it wasn't done in
+//       the sample code) and it worked on Firefox.
+
 const DB_NAME: &str = "mb";
-const KEY: &str = "id";
+// const KEY: &str = "id";
 const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
@@ -27,7 +28,7 @@ async fn build_database(link: Scope<App>) {
         .version(1)
         .add_object_store(
             ObjectStore::new(BUTTONS)
-                .key_path(KEY)
+                // .key_path(KEY)
                 .auto_increment(true)
                 .add_index(
                     Index::new_array(INDEX, ["name", "lastModified", "size", "type"]).unique(true),
