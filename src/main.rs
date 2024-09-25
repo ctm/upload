@@ -11,9 +11,8 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     log::{error, info},
-    rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
     wasm_bindgen::JsCast,
-    web_sys::{Blob, File, HtmlInputElement, Url},
+    web_sys::{Blob, File, HtmlInputElement, IdbDatabase, IdbObjectStore, IdbTransaction, IdbTransactionMode, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
@@ -23,6 +22,7 @@ const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
 async fn build_database(link: Scope<App>) {
+    /*
     match Rexie::builder(DB_NAME)
         .version(1)
         .add_object_store(
@@ -39,12 +39,14 @@ async fn build_database(link: Scope<App>) {
         Err(e) => error!("Could not build buttons database: {e}"),
         Ok(db) => link.send_message(Msg::DbBuilt(db)),
     }
+    */
 }
 
-async fn async_read_buttons(store: Store, link: Scope<App>) {
-    match store.get_all(None, None).await {
+async fn async_read_buttons(store: IdbObjectStore, link: Scope<App>) {
+    match store.get_all() {
         Err(e) => error!("reading buttons failed: {e:?}"),
-        Ok(files) => {
+        Ok(request) => {
+            /*
             let buttons = files
                 .into_iter()
                 .filter_map(|file| match file.dyn_ref::<Blob>() {
@@ -58,12 +60,13 @@ async fn async_read_buttons(store: Store, link: Scope<App>) {
                 })
                 .collect();
             link.send_message(Msg::ButtonsRead(buttons));
+            */
         }
     }
 }
 
-fn read_buttons(db: &Rexie, link: Scope<App>) {
-    let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
+fn read_buttons(db: &IdbDatabase, link: Scope<App>) {
+    let transaction = match db.transaction_str(&BUTTONS) {
         Ok(t) => t,
         Err(e) => {
             error!("Can't create transaction to read buttons: {e:?}");
@@ -91,7 +94,7 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
 // So, the reason read_buttons is split and store_button isn't is just
 // due to me fooling around, since I'm not particularly proficient in
 // async rust.
-async fn store_button(t: Transaction, file: File) {
+async fn store_button(t: IdbTransaction, file: File) {
     let store = match t.store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
@@ -123,7 +126,7 @@ async fn store_button(t: Transaction, file: File) {
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
-    db: Option<Rexie>,
+    db: Option<IdbDatabase>,
     button: Button,
 }
 
@@ -143,7 +146,7 @@ impl From<MouseEvent> for ClickAction {
 }
 
 enum Msg {
-    DbBuilt(Rexie),
+    DbBuilt(IdbDatabase),
     ButtonsRead(Vec<String>),
     Clicked(ClickAction),
     StoreButton(File),
@@ -327,7 +330,7 @@ impl Component for App {
                     self.add_custom_button(url);
                 }
                 if let Some(db) = &self.db {
-                    if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
+                    if let Ok(t) = db.transaction(&STORE_NAMES, IdbTransactionMode::Readwrite) {
                         spawn_local(store_button(t, file));
                     }
                 }

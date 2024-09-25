@@ -823,17 +823,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rexie"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "887466cfa8a12c08ee4b174998135cea8ff0fd84858627cd793e56535a045bc9"
-dependencies = [
- "idb",
- "thiserror",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1050,7 +1039,6 @@ dependencies = [
  "gloo-utils 0.2.0",
  "idb",
  "log",
- "rexie",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",
