@@ -1,23 +1,14 @@
-// This code silently fails on Firefox.  My guess is it's related to
-// https://github.com/devashishdxt/rexie/issues/23 which suggests that
-// serializing the files cause problems.  There's a chance that I can
-// serialize the object_url instead (it's just a string) and have
-// something that works with Firefox as well, without jumping through
-// hoops to do additional serialization.
-//
-// FWIW, this code works fine with Brave, Edge and Safari. :-(
-
 use {
     gloo_events::EventListener,
     gloo_utils::document,
     log::{error, info},
     rexie::{Error, Index, ObjectStore, Rexie, Store, TransactionMode},
-    serde::Serialize,
+    serde::{Deserialize, Serialize},
     serde_wasm_bindgen::Serializer,
     std::{rc::Rc, sync::Mutex},
-    wasm_bindgen::JsCast,
+    wasm_bindgen::{JsCast, JsValue},
     wasm_bindgen_futures::JsFuture,
-    web_sys::{js_sys::Uint8Array, Blob, File, HtmlInputElement, Url},
+    web_sys::{js_sys::Uint8Array, Blob, BlobPropertyBag, File, HtmlInputElement, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
@@ -51,14 +42,17 @@ async fn async_read_buttons(store: Store, link: Scope<App>) {
         Ok(files) => {
             let buttons = files
                 .into_iter()
-                .filter_map(|file| match file.dyn_ref::<Blob>() {
-                    None => {
-                        error!("Could not turn {file:?} into Blob");
-                        None
-                    }
-                    Some(blob) => Url::create_object_url_with_blob(blob)
+                .filter_map(|file| {
+                    let rexie_blob = serde_wasm_bindgen::from_value::<RexieFirefoxFile>(file)
+                        .inspect_err(|e| error!("Can't convert file to blob: {e:?}"))
+                        .ok()?;
+                    let blob: Blob = rexie_blob
+                        .try_into()
+                        .inspect_err(|e| error!("Could not convert into Blob: {e:?}"))
+                        .ok()?;
+                    Url::create_object_url_with_blob(&blob)
                         .inspect_err(|e| error!("Could not turn {blob:?} into object_url: {e:?}"))
-                        .ok(),
+                        .ok()
                 })
                 .collect();
             link.send_message(Msg::ButtonsRead(buttons));
@@ -95,7 +89,7 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
 // The workaround for Firefox is to convert the File to a Vec<u8>
 // before storing and
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct RexieFirefoxFile {
     blob: Vec<u8>,
     name: String,
@@ -126,6 +120,19 @@ impl RexieFirefoxFile {
             size: file.size(),
             last_modified: file.last_modified(),
         })
+    }
+}
+
+impl TryFrom<RexieFirefoxFile> for Blob {
+    type Error = JsValue;
+
+    fn try_from(r: RexieFirefoxFile) -> Result<Self, Self::Error> {
+        let ui8 = Uint8Array::from(r.blob.as_ref());
+        let array = js_sys::Array::new();
+        array.push(&ui8.buffer());
+        let type_ = BlobPropertyBag::new();
+        type_.set_type(&r.type_);
+        Blob::new_with_u8_array_sequence_and_options(&array, &type_)
     }
 }
 
