@@ -10,7 +10,7 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    indexed_db::{Database, Error, Factory, Index, ObjectStore, Transaction},
+    indexed_db::{Database, Factory, Transaction},
     log::{error, info},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
@@ -18,7 +18,6 @@ use {
 };
 
 const DB_NAME: &str = "mb";
-const KEY: &str = "id";
 const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
@@ -41,7 +40,7 @@ async fn build_database(link: Scope<App>) {
                 .build_compound_index(INDEX, &["name", "lastModified", "size", "type"])
                 .unique()
                 .create()
-                .inspect_err(|e| error!("could not build unique index"))?;
+                .inspect_err(|e| error!("could not build unique index: {e:?}"))?;
             Ok(())
         })
         .await
@@ -50,8 +49,6 @@ async fn build_database(link: Scope<App>) {
         Ok(db) => link.send_message(Msg::DbBuilt(db)),
     }
 }
-
-async fn async_read_buttons(store: ObjectStore<OurError>, link: Scope<App>) {}
 
 fn read_buttons(db: &Database<OurError>, link: Scope<App>) {
     let transaction = db.transaction(&STORE_NAMES).run(|t| async move {
@@ -84,17 +81,6 @@ fn read_buttons(db: &Database<OurError>, link: Scope<App>) {
     });
 }
 
-// If we wanted to, we could split this into a non-async store_button
-// and an async async_store_button, like we do with read_buttons and
-// async_read_buttons above.  The upside to doing the split is that
-// nothing has to be added to the executor in the case where there's
-// an error before anything async is called. That's not much of an
-// upside though if the error is unlikely to occur and time isn't
-// critical.
-//
-// So, the reason read_buttons is split and store_button isn't is just
-// due to me fooling around, since I'm not particularly proficient in
-// async rust.
 async fn store_button(t: Transaction<OurError>, file: File) {
     /*
     let store = match t.store(BUTTONS) {
