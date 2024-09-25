@@ -10,7 +10,7 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
-    indexed_db::{Database, Factory, Transaction},
+    indexed_db::{Database, Error, Factory},
     log::{error, info},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
@@ -81,35 +81,24 @@ fn read_buttons(db: &Database<OurError>, link: Scope<App>) {
     });
 }
 
-async fn store_button(t: Transaction<OurError>, file: File) {
-    /*
-    let store = match t.store(BUTTONS) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Can't get store to store buttons: {e:?}");
-            return;
-        }
-    };
-    match store.add(&file, None).await {
-        Ok(_) => {
-            // Do not call done if store failed, because we'll get a panic.
-            if let Err(e) = t.done().await {
-                error!("Could not complete button storage transaction: {e:?}");
-            }
-        }
-        Err(e) => {
-            if let Error::IdbError(idb::Error::DomException(d)) = e {
-                // I am not particularly happy about this code to detect a
-                // uniqueness constraint violation, but it appears to work
-                if d.name() == "ConstraintError" && d.message().contains("uniqueness") {
-                    info!("That button is already stored");
-                }
+fn store_button(db: &Database<OurError>, file: File) {
+    let transaction = db.transaction(&STORE_NAMES).rw().run(|t| async move {
+        let store = t
+            .object_store(BUTTONS)
+            .inspect_err(|e| error!("Can't get store to read buttons: {e:?}"))?;
+        store.add(&file).await.inspect_err(|e| { // TODO: don't use inspect_err
+            if let Error::AlreadyExists = e {
+                info!("That button is already stored");
             } else {
                 error!("Could not store button: {e:?}");
             }
+        })
+    });
+    spawn_local(async move {
+        if let Err(e) = transaction.await {
+            error!("Could not store buttons: {e:?}");
         }
-    }
-    */
+    });
 }
 
 #[derive(Default)]
@@ -319,11 +308,7 @@ impl Component for App {
                     self.add_custom_button(url);
                 }
                 if let Some(db) = &self.db {
-                    /*
-                    if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
-                        spawn_local(store_button(t, file));
-                    }
-                    */
+                    store_button(db, file);
                 }
                 true
             }
