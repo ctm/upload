@@ -11,8 +11,8 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     log::{error, info},
-    wasm_bindgen::JsCast,
-    web_sys::{Blob, File, HtmlInputElement, IdbDatabase, IdbObjectStore, IdbTransaction, IdbTransactionMode, Url},
+    wasm_bindgen::{JsCast, JsValue},
+    web_sys::{js_sys::{self, Reflect}, Blob, File, HtmlInputElement, IdbDatabase, IdbFactory, IdbObjectStore, IdbOpenDbRequest, IdbTransaction, IdbTransactionMode, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
 };
 
@@ -21,7 +21,46 @@ const KEY: &str = "id";
 const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
+/*
+    /// Adds an event handler for `abort` event.
+    pub fn on_abort<F>(&mut self, callback: F)
+    where
+        F: FnOnce(Event) + 'static,
+    {
+        let closure = Closure::once(callback);
+        self.inner
+            .set_onabort(Some(closure.as_ref().unchecked_ref()));
+        self.abort_callback = Some(closure);
+    }
+*/
+
+
+
 async fn build_database(link: Scope<App>) {
+    let factory = match Reflect::get(&js_sys::global(), &JsValue::from("indexedDB")) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Could not find indexDB");
+            return;
+        }
+    };
+    let factory: IdbFactory = match factory.dyn_into() {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Could not turn {e:?} imto an IdbFactory");
+            return;
+        }
+    };
+    let request = match factory.open_with_u32(DB_NAME, 1) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Could not open factory: {e:?}");
+            return;
+        }
+    };
+
+    // yyy(&request, IdbOpenDbRequest, 
+    
     /*
     match Rexie::builder(DB_NAME)
         .version(1)
@@ -66,14 +105,14 @@ async fn async_read_buttons(store: IdbObjectStore, link: Scope<App>) {
 }
 
 fn read_buttons(db: &IdbDatabase, link: Scope<App>) {
-    let transaction = match db.transaction_str(&BUTTONS) {
+    let transaction = match db.transaction_with_str(&BUTTONS) {
         Ok(t) => t,
         Err(e) => {
             error!("Can't create transaction to read buttons: {e:?}");
             return;
         }
     };
-    let store = match transaction.store(BUTTONS) {
+    let store = match transaction.object_store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
             error!("Can't get store to read buttons: {e:?}");
@@ -95,21 +134,24 @@ fn read_buttons(db: &IdbDatabase, link: Scope<App>) {
 // due to me fooling around, since I'm not particularly proficient in
 // async rust.
 async fn store_button(t: IdbTransaction, file: File) {
-    let store = match t.store(BUTTONS) {
+    let store = match t.object_store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
             error!("Can't get store to store buttons: {e:?}");
             return;
         }
     };
-    match store.add(&file, None).await {
-        Ok(_) => {
+    match store.add(&file) {
+        Ok(request) => {
+            /*
             // Do not call done if store failed, because we'll get a panic.
             if let Err(e) = t.done().await {
                 error!("Could not complete button storage transaction: {e:?}");
             }
+            */
         }
         Err(e) => {
+            /*
             if let Error::IdbError(idb::Error::DomException(d)) = e {
                 // I am not particularly happy about this code to detect a
                 // uniqueness constraint violation, but it appears to work
@@ -119,6 +161,7 @@ async fn store_button(t: IdbTransaction, file: File) {
             } else {
                 error!("Could not store button: {e:?}");
             }
+            */
         }
     }
 }
@@ -330,7 +373,7 @@ impl Component for App {
                     self.add_custom_button(url);
                 }
                 if let Some(db) = &self.db {
-                    if let Ok(t) = db.transaction(&STORE_NAMES, IdbTransactionMode::Readwrite) {
+                    if let Ok(t) = db.transaction_with_str_and_mode(&BUTTONS, IdbTransactionMode::Readwrite) {
                         spawn_local(store_button(t, file));
                     }
                 }
