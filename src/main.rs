@@ -10,8 +10,8 @@
 use {
     gloo_events::EventListener,
     gloo_utils::document,
+    indexed_db::{Database, Error, Factory, Index, ObjectStore, Transaction},
     log::{error, info},
-    indexed_db::{Error, Factory, Index, ObjectStore, Database, Transaction},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
@@ -32,59 +32,56 @@ async fn build_database(link: Scope<App>) {
             return;
         }
     };
-   
-    match factory.open(DB_NAME, 1, |evt| async move {
-        let db = evt.database();
-        let store = db.build_object_store(BUTTONS)
-            .auto_increment()
-            .create()?;
-        store.build_compound_index(INDEX, &["name", "lastModified", "size", "type"]).unique().create().inspect_err(|e| error!("could not build unique index"))?;
-        Ok(())
-    }).await {
+
+    match factory
+        .open(DB_NAME, 1, |evt| async move {
+            let db = evt.database();
+            let store = db.build_object_store(BUTTONS).auto_increment().create()?;
+            store
+                .build_compound_index(INDEX, &["name", "lastModified", "size", "type"])
+                .unique()
+                .create()
+                .inspect_err(|e| error!("could not build unique index"))?;
+            Ok(())
+        })
+        .await
+    {
         Err(_) => error!("Could not build buttons database"),
         Ok(db) => link.send_message(Msg::DbBuilt(db)),
     }
 }
 
-async fn async_read_buttons(store: ObjectStore<OurError>, link: Scope<App>) {
-    match store.get_all(None).await {
-        Err(e) => error!("reading buttons failed: {e:?}"),
-        Ok(files) => {
-            let buttons = files
-                .into_iter()
-                .filter_map(|file| match file.dyn_ref::<Blob>() {
-                    None => {
-                        error!("Could not turn {file:?} into Blob");
-                        None
-                    }
-                    Some(blob) => Url::create_object_url_with_blob(blob)
-                        .inspect_err(|e| error!("Could not turn {blob:?} into object_url: {e:?}"))
-                        .ok(),
-                })
-                .collect();
-            link.send_message(Msg::ButtonsRead(buttons));
-        }
-    }
-}
+async fn async_read_buttons(store: ObjectStore<OurError>, link: Scope<App>) {}
 
 fn read_buttons(db: &Database<OurError>, link: Scope<App>) {
-    /*
-    let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
-        Ok(t) => t,
-        Err(e) => {
-            error!("Can't create transaction to read buttons: {e:?}");
-            return;
+    let transaction = db.transaction(&STORE_NAMES).run(|t| async move {
+        let store = t
+            .object_store(BUTTONS)
+            .inspect_err(|e| error!("Can't get store to read buttons: {e:?}"))?;
+        let files = store
+            .get_all(None)
+            .await
+            .inspect_err(|e| error!("reading buttons failed: {e:?}"))?;
+        let buttons = files
+            .into_iter()
+            .filter_map(|file| match file.dyn_ref::<Blob>() {
+                None => {
+                    error!("Could not turn {file:?} into Blob");
+                    None
+                }
+                Some(blob) => Url::create_object_url_with_blob(blob)
+                    .inspect_err(|e| error!("Could not turn {blob:?} into object_url: {e:?}"))
+                    .ok(),
+            })
+            .collect();
+        link.send_message(Msg::ButtonsRead(buttons));
+        Ok(())
+    });
+    spawn_local(async move {
+        if let Err(e) = transaction.await {
+            error!("Could not read buttons: {e:?}");
         }
-    };
-    let store = match transaction.store(BUTTONS) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Can't get store to read buttons: {e:?}");
-            return;
-        }
-    };
-    spawn_local(async_read_buttons(store, link));
-    */
+    });
 }
 
 // If we wanted to, we could split this into a non-async store_button
