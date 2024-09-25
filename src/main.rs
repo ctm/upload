@@ -11,7 +11,7 @@ use {
     gloo_events::EventListener,
     gloo_utils::document,
     log::{error, info},
-    rexie::{Error, Index, ObjectStore, Rexie, Store, Transaction, TransactionMode},
+    indexed_db::{Error, Factory, Index, ObjectStore, Database, Transaction},
     wasm_bindgen::JsCast,
     web_sys::{Blob, File, HtmlInputElement, Url},
     yew::{html::Scope, platform::spawn_local, prelude::*},
@@ -22,27 +22,32 @@ const KEY: &str = "id";
 const INDEX: &str = "file";
 const BUTTONS: &str = "buttons";
 
+type OurError = ();
+
 async fn build_database(link: Scope<App>) {
-    match Rexie::builder(DB_NAME)
-        .version(1)
-        .add_object_store(
-            ObjectStore::new(BUTTONS)
-                .key_path(KEY)
-                .auto_increment(true)
-                .add_index(
-                    Index::new_array(INDEX, ["name", "lastModified", "size", "type"]).unique(true),
-                ),
-        )
-        .build()
-        .await
-    {
-        Err(e) => error!("Could not build buttons database: {e}"),
+    let factory = match Factory::<OurError>::get() {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Can not get factory: {e:?}");
+            return;
+        }
+    };
+   
+    match factory.open(DB_NAME, 1, |evt| async move {
+        let db = evt.database();
+        let store = db.build_object_store(BUTTONS)
+            .auto_increment()
+            .create()?;
+        store.build_compound_index(INDEX, &["name", "lastModified", "size", "type"]).unique().create().inspect_err(|e| error!("could not build unique index"))?;
+        Ok(())
+    }).await {
+        Err(_) => error!("Could not build buttons database"),
         Ok(db) => link.send_message(Msg::DbBuilt(db)),
     }
 }
 
-async fn async_read_buttons(store: Store, link: Scope<App>) {
-    match store.get_all(None, None).await {
+async fn async_read_buttons(store: ObjectStore<OurError>, link: Scope<App>) {
+    match store.get_all(None).await {
         Err(e) => error!("reading buttons failed: {e:?}"),
         Ok(files) => {
             let buttons = files
@@ -62,7 +67,8 @@ async fn async_read_buttons(store: Store, link: Scope<App>) {
     }
 }
 
-fn read_buttons(db: &Rexie, link: Scope<App>) {
+fn read_buttons(db: &Database<OurError>, link: Scope<App>) {
+    /*
     let transaction = match db.transaction(&STORE_NAMES, TransactionMode::ReadOnly) {
         Ok(t) => t,
         Err(e) => {
@@ -78,6 +84,7 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
         }
     };
     spawn_local(async_read_buttons(store, link));
+    */
 }
 
 // If we wanted to, we could split this into a non-async store_button
@@ -91,7 +98,8 @@ fn read_buttons(db: &Rexie, link: Scope<App>) {
 // So, the reason read_buttons is split and store_button isn't is just
 // due to me fooling around, since I'm not particularly proficient in
 // async rust.
-async fn store_button(t: Transaction, file: File) {
+async fn store_button(t: Transaction<OurError>, file: File) {
+    /*
     let store = match t.store(BUTTONS) {
         Ok(s) => s,
         Err(e) => {
@@ -118,12 +126,13 @@ async fn store_button(t: Transaction, file: File) {
             }
         }
     }
+    */
 }
 
 #[derive(Default)]
 struct App {
     change_listener: Option<EventListener>,
-    db: Option<Rexie>,
+    db: Option<Database<OurError>>,
     button: Button,
 }
 
@@ -143,7 +152,7 @@ impl From<MouseEvent> for ClickAction {
 }
 
 enum Msg {
-    DbBuilt(Rexie),
+    DbBuilt(Database<OurError>),
     ButtonsRead(Vec<String>),
     Clicked(ClickAction),
     StoreButton(File),
@@ -327,9 +336,11 @@ impl Component for App {
                     self.add_custom_button(url);
                 }
                 if let Some(db) = &self.db {
+                    /*
                     if let Ok(t) = db.transaction(&STORE_NAMES, TransactionMode::ReadWrite) {
                         spawn_local(store_button(t, file));
                     }
+                    */
                 }
                 true
             }
