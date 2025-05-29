@@ -1,12 +1,3 @@
-// This code silently fails on Firefox.  My guess is it's related to
-// https://github.com/devashishdxt/rexie/issues/23 which suggests that
-// serializing the files cause problems.  There's a chance that I can
-// serialize the object_url instead (it's just a string) and have
-// something that works with Firefox as well, without jumping through
-// hoops to do additional serialization.
-//
-// FWIW, this code works fine with Brave, Edge and Safari. :-(
-
 use {
     gloo_events::EventListener,
     gloo_utils::document,
